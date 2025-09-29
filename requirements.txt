@@ -1,0 +1,11 @@
+crewai
+crewai-tools
+langchain-openai
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+requests
+streamlit
+python-dotenv  # <<< ESSENCIAL PARA CARREGAR O .ENV

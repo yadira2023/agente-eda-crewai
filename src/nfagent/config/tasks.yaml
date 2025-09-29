@@ -1,0 +1,28 @@
+analysis_task:
+  description: |
+    1. Analise a pergunta do usuário: '{question}'.
+    2. Escreva o código Python necessário para responder à pergunta.
+    3. **Sua única ação deve ser usar a ferramenta 'Python Code Executor' para executar este código.**
+    4. O código deve usar `print()` para exibir todos os resultados numéricos.
+    5. Se um gráfico for necessário, o código deve salvá-lo em 'output/' e imprimir a confirmação no formato exato: `print("Gráfico salvo em: output/nome_do_arquivo.png")`.
+  expected_output: |
+    **A saída BRUTA da ferramenta 'Python Code Executor', e NADA MAIS.**
+    Não retorne o código que você escreveu. Retorne APENAS o resultado da execução do código.
+    Por exemplo:
+    Class
+    0    284315
+    1       492
+    Name: count, dtype: int64
+    Gráfico salvo em: output/distribuicao_class.png
+
+reporting_task:
+  description: |
+    1. Revise a pergunta original do usuário: '{question}'.
+    2. Revise o resultado técnico da tarefa de análise, que é uma saída de console.
+    3. Crie um relatório em Markdown bem formatado.
+    4. Use os números e textos da saída da análise para preencher o relatório. NÃO use placeholders como 'X contagens'.
+    5. **Se a saída da análise contiver uma linha 'Gráfico salvo em: output/nome_do_arquivo.png', inclua a imagem no seu relatório Markdown usando a sintaxe: `![Descrição do Gráfico](output/nome_do_arquivo.png)`. Se não houver essa linha, não inclua uma imagem.**
+    6. Sua resposta final deve ser APENAS o relatório em Markdown.
+  expected_output: |
+    Um relatório final completo e bem formatado em Markdown, contendo os números exatos
+    da análise e a imagem do gráfico, se houver.
