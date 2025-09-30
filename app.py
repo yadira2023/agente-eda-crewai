@@ -8,12 +8,11 @@ from io import StringIO
 from dotenv import load_dotenv
 
 # Adiciona o diretório 'src' ao path para permitir importações no ambiente de deploy
-# MANTENHA ESTA LINHA POR ENQUANTO, CASO HAJA PROBLEMAS COM A IMPORTAÇÃO DE 'src'
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src'))) 
 
 from src.nfagent.agent_manager import run_agent_analysis
 
-# Carrega as variáveis de ambiente (mantido para o modelo MODEL, mas não para a chave)
+# Carrega as variáveis de ambiente (mantido para o modelo MODEL)
 load_dotenv()
 
 # --- Configuração da Página e Funções Auxiliares (SEM ALTERAÇÕES) ---
@@ -59,12 +58,12 @@ def load_csv(uploaded_file):
             return None
     return None
 
-# --- Sidebar para Configurações (ALTERADO PARA CHAVE DO USUÁRIO + BOTÃO) ---
+# --- Sidebar para Configurações (CHAVE DO USUÁRIO + BOTÃO) ---
 
 with st.sidebar:
     st.header("Configuração")
     
-    # Input da chave da API da OpenAI - NÃO É PRÉ-PREENCHIDA
+    # Input da chave da API da OpenAI - Valor de entrada do usuário
     openai_api_key_input = st.text_input(
         "Insira sua Chave da API OpenAI", 
         type="password", 
@@ -78,19 +77,19 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # O Botão que inicia a configuração e habilita o agente
+    # O Botão que inicia a configuração
     start_button = st.button("Iniciar Agente", key="start_agent_button") 
     
     # Nota sobre o dataset padrão (opcional)
     st.caption("O agente usará o arquivo padrão se nenhum upload for feito.")
 
-# --- Gerenciamento de Estado do Agente ---
+# --- Gerenciamento de Estado e Carregamento de Dados ---
 
-# Inicializa o estado do agente (se a chave e os dados foram validados)
+# Inicializa o estado do agente
 if "agent_initialized" not in st.session_state:
     st.session_state.agent_initialized = False
 
-# Lógica para carregar o DataFrame (fora do botão, pois o Streamlit precisa do DF em cada rerun)
+# Carregamento do DataFrame
 df = None
 if uploaded_file is not None:
     df = load_csv(uploaded_file)
@@ -102,10 +101,9 @@ else:
         except Exception as e:
             st.error(f"Erro ao carregar o arquivo padrão em '{default_path}': {e}.")
             df = None
-    # NOTA: Não mostramos a mensagem de Warning se o arquivo padrão não existir, pois 
-    # o st.info abaixo já fará a mesma coisa.
 
-# --- Lógica de Validação e Início do Agente ---
+
+# --- Lógica de Validação e Início do Agente (FLUXO SILENCIOSO) ---
 
 if start_button:
     if not openai_api_key_input:
@@ -118,15 +116,13 @@ if start_button:
         # Tudo OK! Configura a variável de ambiente com a chave do usuário
         os.environ["OPENAI_API_KEY"] = openai_api_key_input
         st.session_state.agent_initialized = True
-        st.success("Agente configurado e dados carregados! Você pode começar a perguntar abaixo.")
-        # Opcional: Redireciona o foco para o corpo principal para o usuário não ficar confuso
-        st.balloons()
+        # Fluxo silencioso: não mostra sucesso. O chat aparecendo é o sucesso.
 
 
-# --- Exibição do Status e Chat ---
+# --- Exibição do Status e Habilitação do Chat ---
 
 if not st.session_state.agent_initialized:
-    # Mostra mensagem de status na área principal
+    # Mostra mensagem de status na área principal e para o script
     st.info("Aguardando configuração. Insira a chave da API, carregue seu CSV e clique em 'Iniciar Agente'.")
     st.stop()
 
@@ -142,12 +138,18 @@ for message in st.session_state.messages:
         if "image" in message and message["image"] is not None and os.path.exists(message["image"]):
             st.image(message["image"])
 
-# --- Interface de Input do Chat (Habilitada Apenas Se Inicializado) ---
+# --- Interface de Input do Chat (CORRIGIDO com Sugestões) ---
 
-if prompt := st.chat_input("Ex: 'Descreva os dados' ou 'Gere um gráfico de barras'", key="chat_input_widget"):
-    
-    # NOTA: Não precisamos mais do os.getenv() ou st.stop() aqui, pois o botão de início
-    # já garantiu que a chave está em os.environ e que o DF não é None.
+# Exibe o bloco de sugestões APENAS quando o agente é inicializado
+st.info(
+    "**Sugestões de Perguntas:**\n"
+    "- Descreva o dataset e mostre as 5 primeiras linhas.\n"
+    "- Qual a correlação entre V1, V2 e Amount? Gere um heatmap.\n"
+    "- Crie um histograma para a variável 'Amount'.\n"
+    "- Quais são os valores mínimo e máximo da coluna 'Time'?"
+)
+
+if prompt := st.chat_input("Faça sua pergunta sobre o CSV aqui...", key="chat_input_widget"):
     
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -162,7 +164,7 @@ if prompt := st.chat_input("Ex: 'Descreva os dados' ou 'Gere um gráfico de barr
         final_report = None
         with st_capture_stdout(log_container):
             try:
-                # O CrewAI agora usará a chave definida em os.environ pelo botão 'Iniciar Agente'
+                # O CrewAI usará a chave definida em os.environ
                 crew_output = run_agent_analysis(prompt, df)
                 final_report = crew_output.raw
             except Exception as e:
@@ -178,6 +180,7 @@ if prompt := st.chat_input("Ex: 'Descreva os dados' ou 'Gere um gráfico de barr
         
         if match:
             image_path = match.group(1)
+            # Remove a linha de imagem Markdown do relatório antes de exibir
             report_text_only = re.sub(r"!\[.*\]\((output/[^\)]+)\)\n?", "", final_report).strip()
 
         st.markdown(report_text_only)
