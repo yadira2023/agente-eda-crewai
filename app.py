@@ -7,15 +7,15 @@ from contextlib import contextmanager, redirect_stdout
 from io import StringIO
 from dotenv import load_dotenv
 
-# Adiciona o diretório 'src' ao path para permitir importações no ambiente de deploy
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src'))) 
+# Adiciona o diretório 'src' ao path para permitir importações
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
-from src.nfagent.agent_manager import run_agent_analysis
+from nfagent.agent_manager import run_agent_analysis
 
-# Carrega as variáveis de ambiente (mantido para o modelo MODEL)
+# Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
 
-# --- Configuração da Página e Funções Auxiliares (SEM ALTERAÇÕES) ---
+# --- Configuração da Página do Streamlit e Funções Auxiliares ---
 
 st.set_page_config(page_title="Agente de Análise de Dados", layout="wide")
 st.title("🤖 Agente de Análise de Dados")
@@ -58,38 +58,32 @@ def load_csv(uploaded_file):
             return None
     return None
 
-# --- Sidebar para Configurações (CHAVE DO USUÁRIO + BOTÃO) ---
+# --- Sidebar para Configurações ---
 
 with st.sidebar:
-    st.header("Configuração")
+    st.header("Configurações")
     
-    # Input da chave da API da OpenAI - Valor de entrada do usuário
-    openai_api_key_input = st.text_input(
-        "Insira sua Chave da API OpenAI", 
+    openai_api_key_from_env = os.getenv("OPENAI_API_KEY")
+    current_openai_api_key = st.text_input(
+        "OpenAI API Key", 
         type="password", 
-        key="api_key_input_sidebar"
+        value=openai_api_key_from_env
     )
+    if current_openai_api_key:
+        os.environ["OPENAI_API_KEY"] = current_openai_api_key
+    else:
+        if "OPENAI_API_KEY" in os.environ:
+            del os.environ["OPENAI_API_KEY"]
+            
     st.markdown("---")
     
-    # Upload de arquivo CSV
-    st.subheader("Escolha um arquivo CSV")
-    uploaded_file = st.file_uploader("Drag and drop file here", type="csv")
+    uploaded_file = st.file_uploader("Faça upload do seu CSV de fraudes", type="csv")
     
     st.markdown("---")
-    
-    # O Botão que inicia a configuração
-    start_button = st.button("Iniciar Agente", key="start_agent_button") 
-    
-    # Nota sobre o dataset padrão (opcional)
-    st.caption("O agente usará o arquivo padrão se nenhum upload for feito.")
+    st.info("O agente usará o arquivo de fraude de cartão de crédito padrão se nenhum arquivo for enviado.")
 
-# --- Gerenciamento de Estado e Carregamento de Dados ---
+# --- Lógica Principal de Carregamento de Dados ---
 
-# Inicializa o estado do agente
-if "agent_initialized" not in st.session_state:
-    st.session_state.agent_initialized = False
-
-# Carregamento do DataFrame
 df = None
 if uploaded_file is not None:
     df = load_csv(uploaded_file)
@@ -101,31 +95,8 @@ else:
         except Exception as e:
             st.error(f"Erro ao carregar o arquivo padrão em '{default_path}': {e}.")
             df = None
-
-
-# --- Lógica de Validação e Início do Agente (FLUXO SILENCIOSO) ---
-
-if start_button:
-    if not openai_api_key_input:
-        st.error("ERRO DE CONFIGURAÇÃO: Por favor, insira sua chave da API da OpenAI.")
-        st.session_state.agent_initialized = False
-    elif df is None:
-        st.error("ERRO DE CONFIGURAÇÃO: Não há dados para analisar. Por favor, carregue um arquivo CSV.")
-        st.session_state.agent_initialized = False
     else:
-        # Tudo OK! Configura a variável de ambiente com a chave do usuário
-        os.environ["OPENAI_API_KEY"] = openai_api_key_input
-        st.session_state.agent_initialized = True
-        # Fluxo silencioso: não mostra sucesso. O chat aparecendo é o sucesso.
-
-
-# --- Exibição do Status e Habilitação do Chat ---
-
-if not st.session_state.agent_initialized:
-    # Mostra mensagem de status na área principal e para o script
-    st.info("Aguardando configuração. Insira a chave da API, carregue seu CSV e clique em 'Iniciar Agente'.")
-    st.stop()
-
+        st.warning(f"Arquivo padrão não encontrado em: '{default_path}'. Faça o upload de um CSV para continuar.")
 
 # --- Gerenciamento do Histórico do Chat ---
 
@@ -135,12 +106,11 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        # Se a mensagem do histórico tiver uma imagem, exibe-a
         if "image" in message and message["image"] is not None and os.path.exists(message["image"]):
             st.image(message["image"])
 
-# --- Interface de Input do Chat (CORRIGIDO com Sugestões) ---
-
-# Exibe o bloco de sugestões APENAS quando o agente é inicializado
+# --- Interface de Input do Chat ---
 st.info(
     "**Sugestões de Perguntas:**\n"
     "- Descreva o dataset e mostre as 5 primeiras linhas.\n"
@@ -149,8 +119,18 @@ st.info(
     "- Quais são os valores mínimo e máximo da coluna 'Time'?"
 )
 
+# Mantenha o chat_input simples e direto
 if prompt := st.chat_input("Faça sua pergunta sobre o CSV aqui...", key="chat_input_widget"):
+
+  
+    if not os.getenv("OPENAI_API_KEY"):
+        st.info("Por favor, insira sua chave da API da OpenAI na barra lateral para continuar.")
+        st.stop()
     
+    if df is None:
+        st.error("Não há dados para analisar. Faça o upload de um arquivo CSV ou verifique o arquivo padrão.")
+        st.stop()
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -164,13 +144,14 @@ if prompt := st.chat_input("Faça sua pergunta sobre o CSV aqui...", key="chat_i
         final_report = None
         with st_capture_stdout(log_container):
             try:
-                # O CrewAI usará a chave definida em os.environ
                 crew_output = run_agent_analysis(prompt, df)
                 final_report = crew_output.raw
             except Exception as e:
                 st.error(f"Ocorreu um erro durante a execução do agente: {e}")
                 st.session_state.messages.append({"role": "assistant", "content": f"Erro: {e}", "image": None})
                 st.stop()
+        
+        # <<< A LÓGICA DE EXIBIÇÃO ESTÁ AQUI DENTRO DO IF PROMPT >>>
         
         image_path = None
         report_text_only = final_report
@@ -179,19 +160,22 @@ if prompt := st.chat_input("Faça sua pergunta sobre o CSV aqui...", key="chat_i
         match = re.search(r"!\[.*\]\((output/[^\)]+)\)", final_report)
         
         if match:
-            image_path = match.group(1)
-            # Remove a linha de imagem Markdown do relatório antes de exibir
+            image_path = match.group(1) # Extrai o caminho do arquivo
+            # Remove a linha completa da imagem do relatório para evitar o ícone quebrado
             report_text_only = re.sub(r"!\[.*\]\((output/[^\)]+)\)\n?", "", final_report).strip()
 
+        # Exibe APENAS O TEXTO do relatório no chat
         st.markdown(report_text_only)
         
+        # Se um caminho de imagem foi encontrado e o arquivo existe, exibe a imagem com st.image()
         if image_path and os.path.exists(image_path):
             st.image(image_path, caption="Gráfico gerado pelo agente")
         elif image_path:
             st.warning(f"O agente mencionou um gráfico em '{image_path}', mas o arquivo não foi encontrado.")
 
+        # Adiciona a resposta completa (texto e caminho da imagem) ao histórico
         st.session_state.messages.append({
             "role": "assistant", 
-            "content": report_text_only,
-            "image": image_path
+            "content": report_text_only, # Salva apenas o texto no histórico
+            "image": image_path # Salva o caminho da imagem para recarregar a página
         })
